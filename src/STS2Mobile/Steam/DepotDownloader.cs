@@ -30,6 +30,14 @@ public class DepotDownloader : IDisposable
     private const int MaxRetries = 5;
     private const int MaxConcurrentDownloads = 8;
 
+    // Steam branches. The beta ("public-beta", open, no password) tracks the
+    // public beta build; "public" is the default release build.
+    public const string PublicBranch = "public";
+    public const string BetaBranch = "public-beta";
+
+    // Branch to download / check updates for. Defaults to the release build.
+    public string Branch { get; set; } = PublicBranch;
+
     private readonly SteamConnection _connection;
     private readonly string _gameDir;
     private readonly string _stateDir;
@@ -39,8 +47,10 @@ public class DepotDownloader : IDisposable
     private IReadOnlyList<Server> _servers;
     private int _serverIndex;
     private readonly Dictionary<(uint, string), string> _cdnAuthTokens = new();
-    private readonly Dictionary<uint, (ulong Code, DateTime Expiry)> _manifestRequestCodes = new();
     private readonly Dictionary<
+        (uint DepotId, ulong ManifestId),
+        (ulong Code, DateTime Expiry)
+    > _manifestRequestCodes = new();    private readonly Dictionary<
         uint,
         SteamApps.PICSProductInfoCallback.PICSProductInfo
     > _appInfoCache = new();
@@ -225,9 +235,19 @@ public class DepotDownloader : IDisposable
                     continue;
             }
 
-            var gidNode = manifests["public"]["gid"];
+            var gidNode = manifests[Branch]["gid"];
             if (gidNode == KeyValue.Invalid || gidNode.Value == null)
-                continue;
+            {
+                if (Branch != PublicBranch)
+                {
+                    Log(
+                        $"Depot {depotId} has no '{Branch}' manifest, falling back to '{PublicBranch}'"
+                    );
+                    gidNode = manifests[PublicBranch]["gid"];
+                }
+                if (gidNode == KeyValue.Invalid || gidNode.Value == null)
+                    continue;
+            }
 
             if (!ulong.TryParse(gidNode.Value, out var manifestId))
                 continue;
@@ -294,8 +314,9 @@ public class DepotDownloader : IDisposable
 
     private async Task<ulong> GetManifestRequestCodeAsync(uint depotId, ulong manifestId)
     {
+        var codeKey = (depotId, manifestId);
         if (
-            _manifestRequestCodes.TryGetValue(depotId, out var cached)
+            _manifestRequestCodes.TryGetValue(codeKey, out var cached)
             && DateTime.UtcNow < cached.Expiry
         )
         {
@@ -306,7 +327,7 @@ public class DepotDownloader : IDisposable
             depotId,
             AppId,
             manifestId,
-            "public"
+            Branch
         );
         if (code == 0)
             throw new Exception(
@@ -314,7 +335,7 @@ public class DepotDownloader : IDisposable
                     + "Ensure the account owns this app."
             );
 
-        _manifestRequestCodes[depotId] = (code, DateTime.UtcNow.AddMinutes(5));
+        _manifestRequestCodes[codeKey] = (code, DateTime.UtcNow.AddMinutes(5));
         return code;
     }
 
@@ -690,20 +711,59 @@ public class DepotDownloader : IDisposable
             .ToList();
     }
 
+    // Manifest state is tracked per branch so switching between public and
+    // beta doesn't confuse update detection or the file diff.
+    private static string SanitizeBranch(string branch) =>
+        string.Concat(branch.Select(c => char.IsLetterOrDigit(c) ? c : '_'));
+
+    private string ManifestIdPath(uint depotId) =>
+        Path.Combine(_stateDir, $"{depotId}.{SanitizeBranch(Branch)}.id");
+
+    private string ManifestPath(uint depotId) =>
+        Path.Combine(_stateDir, $"{depotId}.{SanitizeBranch(Branch)}.manifest");
+
     private ulong LoadCachedManifestId(uint depotId)
     {
-        var path = Path.Combine(_stateDir, $"{depotId}.id");
+        var path = ManifestIdPath(depotId);
         if (!File.Exists(path))
-            return 0;
+        {
+            // Builds predating per-branch state stored the public manifest
+            // under the bare depot id; pick it up instead of re-verifying.
+            if (Branch == PublicBranch)
+            {
+                var legacy = Path.Combine(_stateDir, $"{depotId}.id");
+                if (File.Exists(legacy))
+                    path = legacy;
+                else
+                    return 0;
+            }
+            else
+            {
+                return 0;
+            }
+        }
 
         return ulong.TryParse(File.ReadAllText(path).Trim(), out var id) ? id : 0;
     }
 
     private DepotManifest LoadCachedManifest(uint depotId)
     {
-        var path = Path.Combine(_stateDir, $"{depotId}.manifest");
+        var path = ManifestPath(depotId);
         if (!File.Exists(path))
-            return null;
+        {
+            if (Branch == PublicBranch)
+            {
+                var legacy = Path.Combine(_stateDir, $"{depotId}.manifest");
+                if (File.Exists(legacy))
+                    path = legacy;
+                else
+                    return null;
+            }
+            else
+            {
+                return null;
+            }
+        }
 
         try
         {
@@ -718,11 +778,11 @@ public class DepotDownloader : IDisposable
 
     private void SaveManifest(uint depotId, DepotManifest manifest, ulong manifestId)
     {
-        using (var fs = File.Create(Path.Combine(_stateDir, $"{depotId}.manifest")))
+        using (var fs = File.Create(ManifestPath(depotId)))
         {
             manifest.Serialize(fs);
         }
-        File.WriteAllText(Path.Combine(_stateDir, $"{depotId}.id"), manifestId.ToString());
+        File.WriteAllText(ManifestIdPath(depotId), manifestId.ToString());
     }
 
     private void Log(string msg)

@@ -59,7 +59,7 @@ public class LauncherController
                 if (LauncherModel.GameFilesReady())
                 {
                     var text = _model.InGameMode ? "PLAY" : "RESTART APP";
-                    _view.Actions.ShowLaunch(text, showCloudSync: false, showUpdate: false);
+                    ShowLaunchUI(text, showCloudSync: false, showUpdate: false);
                 }
                 else
                     _view.Actions.ShowRetry();
@@ -109,21 +109,31 @@ public class LauncherController
         _view.Download.DownloadRequested += OnDownloadPressed;
         _view.Actions.LaunchPressed += OnLaunchPressed;
         _view.Actions.RetryPressed += OnRetryPressed;
-        _view.Actions.LocalBackupToggled += OnLocalBackupToggled;
-        _view.Actions.CloudSyncToggled += OnCloudSyncToggled;
+        _view.Actions.SettingsPressed += () => _view.ShowSettingsPage();
+        _view.Settings.BackPressed += () => _view.ShowMainPage();
+        _view.Settings.LocalBackupToggled += OnLocalBackupToggled;
+        _view.Settings.CloudSyncToggled += OnCloudSyncToggled;
+        _view.Settings.BetaBranchToggled += OnBetaBranchToggled;
         _view.Actions.CloudPushPressed += OnCloudPushPressed;
         _view.Actions.CloudPullPressed += OnCloudPullPressed;
         _view.Actions.CheckForUpdatesPressed += OnCheckForUpdatesPressed;
 
         var localBackupPref = LauncherModel.LoadLocalBackupPref();
-        _view.Actions.SetLocalBackupChecked(localBackupPref);
+        _view.Settings.SetLocalBackupChecked(localBackupPref);
         CloudSyncCoordinator.LocalBackupEnabled = localBackupPref;
         if (localBackupPref)
             AppPaths.EnsureExternalDirectories();
-        _view.Actions.SetCloudSyncChecked(LauncherModel.LoadCloudSyncPref());
+        _view.Settings.SetCloudSyncChecked(LauncherModel.LoadCloudSyncPref());
+        _view.Settings.SetBetaBranchChecked(LauncherModel.LoadBetaBranchPref());
 
         var result = _model.StartSession();
         HandleFastPath(result);
+    }
+
+    private void ShowLaunchUI(string text, bool showCloudSync, bool showUpdate)
+    {
+        _view.Actions.ShowLaunch(text, showCloudSync, showUpdate);
+        _view.ShowMainPage();
     }
 
     private void HandleFastPath(FastPathResult result)
@@ -133,7 +143,7 @@ public class LauncherController
             case FastPathResult.ReadyToLaunch:
                 _view.SetStatus($"Welcome back, {_model.AccountName}");
                 var text = _model.InGameMode ? "PLAY" : "RESTART APP";
-                _view.Actions.ShowLaunch(text, showCloudSync: true, showUpdate: true);
+                ShowLaunchUI(text, showCloudSync: true, showUpdate: true);
                 break;
 
             case FastPathResult.AutoConnect:
@@ -171,7 +181,7 @@ public class LauncherController
                     _view.SetStatus("No connection — saved credentials will be used");
                     _view.AppendLog("Connection timed out. Valid ownership marker found.");
                     var text = _model.InGameMode ? "PLAY" : "RESTART APP";
-                    _view.Actions.ShowLaunch(text, showCloudSync: true, showUpdate: false);
+                    ShowLaunchUI(text, showCloudSync: true, showUpdate: false);
                 });
             }
             else
@@ -233,7 +243,7 @@ public class LauncherController
                 if (LauncherModel.GameFilesReady())
                 {
                     var text = _model.InGameMode ? "PLAY" : "RESTART APP";
-                    _view.Actions.ShowLaunch(text, showCloudSync: true, showUpdate: true);
+                    ShowLaunchUI(text, showCloudSync: true, showUpdate: true);
                 }
                 else
                 {
@@ -338,6 +348,14 @@ public class LauncherController
     {
         LauncherModel.SaveCloudSyncPref(pressed);
         LauncherPatches.CloudSyncEnabled = pressed;
+    }
+
+    private void OnBetaBranchToggled(bool pressed)
+    {
+        LauncherModel.SaveBetaBranchPref(pressed);
+        var branch = pressed ? DepotDownloader.BetaBranch : DepotDownloader.PublicBranch;
+        _view.AppendLog($"Game branch set to '{branch}'. Press CHECK FOR UPDATES to switch builds.");
+        _view.SetStatus($"Branch: {branch} — check for updates to switch");
     }
 
     private void OnCloudPushPressed()

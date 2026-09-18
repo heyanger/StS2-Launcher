@@ -13,11 +13,13 @@ public class LauncherView
     public CodeSection Code { get; }
     public DownloadSection Download { get; }
     public ActionSection Actions { get; }
+    public SettingsSection Settings { get; }
     public LogView Log { get; }
 
     private readonly StyledLabel _statusLabel;
     private readonly Control _parent;
     private readonly StyledPanel _panel;
+    private readonly Control _settingsOverlay;
     private float _panelBaseY;
 
     public LauncherView(Control parent, float scale)
@@ -106,9 +108,29 @@ public class LauncherView
         Log.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
         Log.GuiInput += DismissKeyboard;
         right.AddChild(Log);
+
+        // Settings live on their own full-screen page on top of the main
+        // panel so the main column is never squeezed.
+        _settingsOverlay = new Control();
+        _settingsOverlay.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _settingsOverlay.Visible = false;
+        var settingsBg = new ScreenBackground();
+        settingsBg.GuiInput += DismissKeyboard;
+        _settingsOverlay.AddChild(settingsBg);
+        var settingsPanel = new StyledPanel(scale, widthRatio: 0.9f);
+        settingsPanel.UpdateSizeFromViewport(vpSize);
+        settingsPanel.Panel.GuiInput += DismissKeyboard;
+        _settingsOverlay.AddChild(settingsPanel);
+        Settings = new SettingsSection(scale);
+        settingsPanel.Content.AddChild(Settings);
+        parent.AddChild(_settingsOverlay);
     }
 
     private readonly float _scale;
+
+    public void ShowSettingsPage() => _settingsOverlay.Visible = true;
+
+    public void ShowMainPage() => _settingsOverlay.Visible = false;
 
     public void SetStatus(string text) => _statusLabel.Text = text;
 
@@ -121,6 +143,7 @@ public class LauncherView
         Login.Visible = false;
         Code.Visible = false;
         Download.Visible = false;
+        _settingsOverlay.Visible = false;
         Actions.HideAll();
     }
 

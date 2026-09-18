@@ -220,7 +220,7 @@ public class LauncherModel : IDisposable
         }
 
         _downloader?.Dispose();
-        _downloader = new DepotDownloader(_connection, _dataDir);
+        _downloader = new DepotDownloader(_connection, _dataDir) { Branch = GameBranch };
         _downloader.LogMessage += msg => DownloadLogReceived?.Invoke(msg);
         _downloader.ProgressChanged += p => DownloadProgressChanged?.Invoke(p);
 
@@ -253,7 +253,10 @@ public class LauncherModel : IDisposable
                 return;
             }
 
-            var downloader = new DepotDownloader(_connection, _dataDir);
+            var downloader = new DepotDownloader(_connection, _dataDir)
+            {
+                Branch = GameBranch,
+            };
             downloader.LogMessage += msg => DownloadLogReceived?.Invoke(msg);
 
             bool hasUpdate = await Task.Run(() => downloader.CheckForUpdatesAsync());
@@ -393,7 +396,6 @@ public class LauncherModel : IDisposable
     }
 
     private static string CloudSyncPrefPath => Path.Combine(OS.GetDataDir(), "cloud_sync_enabled");
-
     public static bool LoadCloudSyncPref()
     {
         try
@@ -413,6 +415,34 @@ public class LauncherModel : IDisposable
         }
         catch { }
     }
+
+    private static string BetaBranchPrefPath =>
+        Path.Combine(OS.GetDataDir(), "beta_branch_enabled");
+
+    public static bool LoadBetaBranchPref()
+    {
+        try
+        {
+            if (File.Exists(BetaBranchPrefPath))
+                return File.ReadAllText(BetaBranchPrefPath).Trim() == "true";
+        }
+        catch { }
+        return false;
+    }
+
+    public static void SaveBetaBranchPref(bool enabled)
+    {
+        try
+        {
+            File.WriteAllText(BetaBranchPrefPath, enabled ? "true" : "false");
+        }
+        catch { }
+    }
+
+    // Steam branch to download / check updates for. "public-beta" is the open
+    // public beta branch; otherwise the default release build.
+    public static string GameBranch =>
+        LoadBetaBranchPref() ? DepotDownloader.BetaBranch : DepotDownloader.PublicBranch;
 
     public static GodotObject GetGodotApp()
     {
